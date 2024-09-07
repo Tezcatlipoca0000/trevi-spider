@@ -18,6 +18,7 @@ def crawl():
 	last_page = False
 
 	# Begin scraping
+	print("Beginning to scrape the data...")
 	options = webdriver.ChromeOptions()
 	options.add_argument('--headless')
 
@@ -95,6 +96,7 @@ def crawl():
 	trevi_df = pd.DataFrame.from_dict(products)
 	with pd.ExcelWriter('trevi_full.xlsx') as writer:
 		trevi_df.to_excel(writer)
+	print("Scraping successfull!")
 
 def get_order():
 	"""
@@ -113,6 +115,7 @@ def get_order():
 		"https://www.googleapis.com/auth/gmail.readonly"
 	]
 
+	print("Downloading placed order...")
 	# Get gmail authorization
 	creds = None
 	if os.path.exists("token.json"):
@@ -134,7 +137,7 @@ def get_order():
 		# Get correct message id
 		result = service.users().messages().list(
 			userId="me",
-			labelIds=["INBOX"],
+			labelIds=["SENT"],
 			q="filename:pedido.xlsx",
 			maxResults=1
 		).execute()
@@ -167,19 +170,12 @@ def get_order():
 	except HttpError as error:
 		print(f"An error occured: {error}")
 
-def list_data():
-	"""
-	MAYBE *********
-	Get 3 types of output:
-		- Default: (All) take order into account and limit when not present and print merged info
-		- IO: (Ignore Order)  dont take order into account and print new info 
-		- OO: (Only Order) Only take order into account and print ordered info
-	"""
+def list_data(arg="default"):
 	"""
 	Update my DB with the new costs
 	This program is dependant on:
 	    "Provedores Todos.xlsm" ----> My DB
-	    "pedido.xlsx" ----> downloaded by trevi_order.py (it's the ordered place to the provider)
+	    "pedido.xlsx" ----> downloaded by trevi_order.py (it's the list of products ordered to the provider)
 	    "trevi_full.xlsx" ----> it's the list scraped by trevi_spider.py (all the provider's prices from the website)
 	"""
 	import pandas as pd
@@ -187,6 +183,7 @@ def list_data():
 	import gc
 	import datetime
 
+	print("Updating data...")
 	# Start with an emprty df
 	new_df = pd.DataFrame()
 
@@ -203,7 +200,8 @@ def list_data():
 	new_df["Pieces"] = my_df["Piezas"]
 	new_df["Sub"] = my_df["Subtotal"]
 	new_df["Date"] = my_df["Última Rev. Costos"]
-	new_df["Cantidad"] = my_df["Límite"] 
+	new_df["Cantidad"] = my_df["Límite"]
+	new_df["Ordered"] = False 
 
 	# Clear memory
 	del my_df
@@ -214,23 +212,14 @@ def list_data():
 	order_df.rename(columns={"Clave": "Key"}, inplace=True)
 
 	# From ordered_df push Quantity ordered in the correct row
-	new_df.set_index("Key", inplace=True)
-	order_df.set_index("Key", inplace=True)
-	order_df = order_df.groupby("Key")["Cantidad"].sum().reset_index()
-	merged_df = new_df.merge(order_df[['Key', 'Cantidad']], how='left', on='Key')
-	new_df["Cantidad"] = np.where(merged_df['Cantidad_y'].isna(), merged_df['Cantidad_x'], merged_df['Cantidad_y'])
-	new_df.reset_index(inplace=True)
-
-	""" OLD 
-	new_df.set_index("Key", inplace=True)
-	order_df.set_index("Key", inplace=True)
-	order_df = order_df.groupby("Key")["Cantidad"].sum().reset_index()
-	new_df = new_df.merge(order_df, on="Key", how="left")
-	new_df.reset_index(inplace=True)
-	"""
+	if not arg == "-IO":
+		for idx, row in order_df.iterrows():
+			for idx2, row2 in new_df.iterrows():
+				if order_df.loc[idx, "Key"] == new_df.loc[idx2, "Key"]:
+					new_df.loc[idx2, "Ordered"] = True
+					new_df.loc[idx2, "Cantidad"] = order_df.loc[idx, "Cantidad"]
 	
 	# Clear memory
-	del merged_df
 	del order_df
 	gc.collect()
 
@@ -287,16 +276,17 @@ def list_data():
 	        merged_df.loc[idx, "New Price"] = get_new_price(row)
 	    else:
 	        merged_df.loc[idx, "New Price"] = "NA"
-
+	
 	# Set New subtotal to replace my existing subtotal column 
 	"""
-	Treviño's prices already include taxes
-	IV == iva == 16%
-	IE == ieps == 8%
-	Sometimes Treviño's prices reflect the total in my DB and sometimes reflects the unitary price
-	T == when Treviño's prices correspond to the total in my DB
-	U == when Treviño's prices correspond to the unitary price in my DB
+	#Treviño's prices already include taxes
+	#IV == iva == 16%
+	#IE == ieps == 8%
+	#Sometimes Treviño's prices reflect the total in my DB and sometimes reflects the unitary price
+	#T == when Treviño's prices correspond to the total in my DB
+	#U == when Treviño's prices correspond to the unitary price in my DB
 	"""
+	
 	merged_df.reset_index(inplace=True)
 	merged_df["New Subtotal"] = 0
 	for idx, row in merged_df.iterrows():
@@ -321,7 +311,12 @@ def list_data():
 	    else: 
 	        merged_df.loc[idx, "New Subtotal"] = merged_df.loc[idx, "Sub"]
 	    # Modify date column to facilitate excel macro "filtrar datos" which shows rise in prices 
-	    merged_df.loc[idx, "Date"] = f"{datetime.date.today().day}/{datetime.date.today().month}/{datetime.date.today().year}"
+	    if arg == "-OO":
+	    	if merged_df.loc[idx, "Ordered"] == True:
+	    		merged_df.loc[idx, "Date"] = f"{datetime.date.today().day}/{datetime.date.today().month}/{datetime.date.today().year}"
+	    else:
+	    	merged_df.loc[idx, "Date"] = f"{datetime.date.today().day}/{datetime.date.today().month}/{datetime.date.today().year}"
 
 	merged_df.to_excel("Final.xlsx")
-	print("Final.xlsx file was created")
+	print("All done! Check Final.xlsm to review the updated data.")
+	

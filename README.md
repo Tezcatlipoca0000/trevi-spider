@@ -40,5 +40,4 @@ It can execute three distinct functions to populate the local business database 
 		- Final.xlsx ~ Updated dataframe with necesary information **git ignored**
 
 ## What I'm thinking about:
-	- Uploading all the necessary sample_files.
-	- Adding a second flag to ignore, or only consider, the placed-order in the final output. 
+	- Uploading all the necessary sample_files. 
